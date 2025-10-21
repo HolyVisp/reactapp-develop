@@ -1,27 +1,18 @@
-import { Outlet } from 'react-router-dom';
-import {
-    Box,
-    Grid
-} from "@mui/material";
-import {useSelector} from "react-redux";
+import {Outlet} from 'react-router-dom';
+import {Box, Container, Toolbar} from "@mui/material";
 import AppBarComponent from "../AppBarComponent";
 
-
-
-
+// Единый лэйаут приложения: фиксированная верхняя панель и основная область контента
 export default function NavigationRoute(){
-    const isOpen = useSelector(state => state.navigation.isOpen)
     return (
         <>
-            <Box sx={{ display: "flex" }}>
-                <Grid container spacing={2} sx={{ flexGrow: 1 }}>
-                    <Grid item xl={12} lg={12} md={12} sm={12} xs={12}>
-                        <AppBarComponent/>
-                    </Grid>
-                    <Grid item xl={12} lg={12} md={12} sm={12} xs={12}>
-                        <Outlet />
-                    </Grid>
-                </Grid>
+            <AppBarComponent/>
+            <Box component="main" sx={{flexGrow: 1, bgcolor: "background.default", minHeight: "100vh"}}>
+                {/* Отступ, компенсирующий фиксированную AppBar */}
+                <Toolbar/>
+                <Container maxWidth="xl" sx={{pt: 4, pb: 6}}>
+                    <Outlet />
+                </Container>
             </Box>
         </>
     );
