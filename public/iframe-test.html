@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Iframe Test</title>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <h1>Тестирование iframe</h1>
+    <p>Это родительское приложение, которое будет передавать токен в iframe.</p>
+    
+    <button id="sendToken">Отправить токен в iframe</button>
+    <button id="loadApp">Загрузить приложение в iframe</button>
+    
+    <iframe id="appFrame" src="http://localhost:3000" width="100%" height="600" style="border: 1px solid #ccc;"></iframe>
+    
+    <script>
+        document.getElementById('loadApp').addEventListener('click', function() {
+            document.getElementById('appFrame').src = 'http://localhost:3000';
+        });
+        
+        document.getElementById('sendToken').addEventListener('click', function() {
+            // В реальном приложении здесь будет настоящий токен
+            const fakeToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+            
+            // Отправляем токен в iframe
+            document.getElementById('appFrame').contentWindow.postMessage({
+                type: 'AUTH_TOKEN',
+                token: fakeToken
+            }, '*');
+            
+            console.log('Токен отправлен в iframe');
+        });
+        
+        // Слушаем сообщения от iframe
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'REQUEST_AUTH_TOKEN') {
+                console.log('Запрос токена получен от iframe');
+                // В реальном приложении здесь будет логика для отправки токена
+            }
+        });
+    </script>
+</body>
+</html>
