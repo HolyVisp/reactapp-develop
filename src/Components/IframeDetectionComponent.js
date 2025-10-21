@@ -1,74 +1,121 @@
-import React, { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { CircularProgress, Box, Typography } from '@mui/material';
+import React, {useEffect, useRef, useState} from 'react';
+import {useDispatch} from 'react-redux';
+import {Alert, Box, Button, CircularProgress, Typography} from '@mui/material';
 import AuthorizationService from '../Api/Services/AuthorizationService';
-import AuthorizationPage from '../Pages/AuthorizationPage';
+
+const WAITING_TIMEOUT = 60000;
 
 const IframeDetectionComponent = ({ children }) => {
     const [isIframe, setIsIframe] = useState(null);
     const [tokenReceived, setTokenReceived] = useState(false);
-    const [showAuth, setShowAuth] = useState(false);
+    const [error, setError] = useState('');
+    const [retryCounter, setRetryCounter] = useState(0);
     const dispatch = useDispatch();
-    const inIframe = useSelector(state => state.iframe.inIframe);
+    const timerRef = useRef(null);
+    const tokenReceivedRef = useRef(false);
 
     useEffect(() => {
-        // Проверяем, запущено ли приложение внутри iframe
-        const inIframe = window.self !== window.top;
-        setIsIframe(inIframe);
-        // Сохраняем состояние в хранилище
-        dispatch({type: "SET_IN_IFRAME", payload: inIframe});
+        let isMounted = true;
+        let detectedIframe = false;
 
-        if (inIframe) {
-            // Слушаем сообщения от родительского приложения
-            const handleMessage = (event) => {
-                // В реальной реализации необходимо проверять источник сообщения
-                // Для безопасности следует проверять event.origin на соответствие ожидаемым значениям
-                if (event.data && event.data.type === 'AUTH_TOKEN') {
-                    const token = event.data.token;
-                    if (token) {
-                        // Валидируем токен перед использованием
-                        AuthorizationService.validate(token)
-                            .then(function(response){
-                                if(response.status === 200) {
-                                    dispatch({type:"CHANGE_IS_LOGIN", payload: token});
-                                    localStorage.Token = token;
-                                    let user = JSON.parse(atob(token.split('.')[1]));
-                                    localStorage.User = JSON.stringify(user)
-                                    dispatch({type:"CHANGE_USER", payload: user});
-                                    setTokenReceived(true);
-                                    setShowAuth(false); // Не показываем страницу авторизации
-                                } else {
-                                    // Токен невалидный, показываем страницу авторизации
-                                    setShowAuth(true);
-                                }
-                            }).catch(function (error) {
-                                // Ошибка валидации, показываем страницу авторизации
-                                setShowAuth(true);
-                            });
-                    }
-                }
-            };
+        try {
+            detectedIframe = window.self !== window.top;
+        } catch (e) {
+            detectedIframe = true;
+        }
 
-            window.addEventListener('message', handleMessage);
-            
-            // Запрашиваем токен у родительского приложения
-            window.parent.postMessage({ type: 'REQUEST_AUTH_TOKEN' }, '*');
+        setIsIframe(detectedIframe);
+        dispatch({type: 'SET_IN_IFRAME', payload: detectedIframe});
 
-            // Устанавливаем таймаут для показа страницы авторизации, если токен не получен
-            const timeout = setTimeout(() => {
-                if (!tokenReceived) {
-                    setShowAuth(true);
-                }
-            }, 10000); // Таймаут 10 секунд
-
+        if (!detectedIframe) {
             return () => {
-                window.removeEventListener('message', handleMessage);
-                clearTimeout(timeout);
+                isMounted = false;
             };
         }
-    }, [dispatch, tokenReceived]);
 
-    // Показываем индикатор загрузки во время определения наличия iframe
+        tokenReceivedRef.current = false;
+        setTokenReceived(false);
+        setError('');
+
+        const handleMessage = (event) => {
+            if (!event.data || typeof event.data !== 'object') {
+                return;
+            }
+
+            if (event.data.type !== 'AUTH_TOKEN' || tokenReceivedRef.current) {
+                return;
+            }
+
+            const token = event.data.token;
+            if (!token) {
+                setError('Получен пустой токен авторизации.');
+                return;
+            }
+
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+                timerRef.current = null;
+            }
+
+            AuthorizationService.validate(token)
+                .then((response) => {
+                    if (!isMounted) {
+                        return;
+                    }
+
+                    if (response.status === 200) {
+                        tokenReceivedRef.current = true;
+                        setTokenReceived(true);
+                        setError('');
+
+                        dispatch({type: 'CHANGE_IS_LOGIN', payload: token});
+                        localStorage.Token = token;
+
+                        try {
+                            const payload = JSON.parse(atob(token.split('.')[1]));
+                            localStorage.User = JSON.stringify(payload);
+                            dispatch({type: 'CHANGE_USER', payload});
+                        } catch (e) {
+                            const emptyUser = {};
+                            localStorage.User = JSON.stringify(emptyUser);
+                            dispatch({type: 'CHANGE_USER', payload: emptyUser});
+                        }
+                    } else {
+                        setError('Получен недействительный токен авторизации.');
+                    }
+                })
+                .catch(() => {
+                    if (!isMounted) {
+                        return;
+                    }
+                    setError('Не удалось подтвердить токен авторизации.');
+                });
+        };
+
+        window.addEventListener('message', handleMessage);
+        window.parent.postMessage({ type: 'REQUEST_AUTH_TOKEN' }, '*');
+
+        timerRef.current = window.setTimeout(() => {
+            if (!tokenReceivedRef.current && isMounted) {
+                setError('Не удалось получить токен авторизации от родительского приложения. Попробуйте обновить страницу.');
+            }
+        }, WAITING_TIMEOUT);
+
+        return () => {
+            isMounted = false;
+            window.removeEventListener('message', handleMessage);
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, [dispatch, retryCounter]);
+
+    const handleRetry = () => {
+        setError('');
+        setRetryCounter((prev) => prev + 1);
+    };
+
     if (isIframe === null) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
@@ -77,39 +124,36 @@ const IframeDetectionComponent = ({ children }) => {
         );
     }
 
-    // Если приложение внутри iframe и ожидает токен
-    if (isIframe && !tokenReceived && !showAuth) {
+    if (isIframe && error) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" height="100vh" px={2}>
+                <Alert
+                    severity="error"
+                    action={(
+                        <Button color="inherit" size="small" onClick={handleRetry}>
+                            Повторить
+                        </Button>
+                    )}
+                    sx={{maxWidth: 480}}
+                >
+                    {error}
+                </Alert>
+            </Box>
+        );
+    }
+
+    if (isIframe && !tokenReceived) {
         return (
             <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" height="100vh">
                 <CircularProgress />
-                <Typography variant="h6" style={{ marginTop: '20px' }}>
+                <Typography variant="h6" sx={{mt: 2}}>
                     Ожидание токена от родительского приложения...
                 </Typography>
             </Box>
         );
     }
 
-    // Если приложение внутри iframe и токен получен или показывается страница авторизации
-    if (isIframe) {
-        if (tokenReceived) {
-            return children;
-        }
-        if (showAuth) {
-            return <AuthorizationPage />;
-        }
-    }
-
-    // Если приложение не внутри iframe, показываем обычное приложение
-    if (!isIframe) {
-        return children;
-    }
-
-    // Резервный вариант
-    return (
-        <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
-            <CircularProgress />
-        </Box>
-    );
+    return children;
 };
 
 export default IframeDetectionComponent;
